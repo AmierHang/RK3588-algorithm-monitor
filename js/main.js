@@ -1,42 +1,37 @@
 /**
- * RK3588 算法智能监控台
- * 可见光 / 红外共用同一场景时钟，两路预览始终同时播放。
- * 主画面只切换显示通道，不会暂停另一路。
+ * 可见光 / 红外 RTSP 经本地服务转发后播放。
+ * 「同时播放」与两个单路按钮并排。点下去后主画面左右各一半同时播放。
  */
 (() => {
   "use strict";
 
   const CHANNELS = {
-    vis: { name: "CAM-01 可见光", model: "yolov8s_vis_640.rknn", burn: "CAM-01" },
-    ir: { name: "CAM-02 红外", model: "yolov8s_ir_640.rknn", burn: "CAM-02" },
+    vis: {
+      name: "CAM-01 可见光",
+      model: "rtsp://192.168.137.100:3500/video11-live/video11",
+      burn: "CAM-01",
+    },
+    ir: {
+      name: "CAM-02 红外",
+      model: "rtsp://192.168.137.100:3501/video0-live/video0",
+      burn: "CAM-02",
+    },
   };
 
-  const mainCanvas = document.getElementById("main-canvas");
-  const visCanvas = document.getElementById("vis-canvas");
-  const irCanvas = document.getElementById("ir-canvas");
+  const STATE_TEXT = {
+    idle: "未播放",
+    connecting: "连接中",
+    playing: "播放中",
+    error: "连接失败",
+  };
+
   const viewport = document.getElementById("viewport");
+  const btnPlay = document.getElementById("btn-play");
+  const btnFull = document.getElementById("btn-full");
   const alarm = document.getElementById("alarm");
   const alarmText = document.getElementById("alarm-text");
-  const btnFull = document.getElementById("btn-full");
-
-  const world = Scene.create();
-  Render.init();
   let channel = "vis";
-  let last = 0;
-
-  function fit(canvas) {
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) return null;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.max(2, Math.round(rect.width * dpr));
-    const h = Math.max(2, Math.round(rect.height * dpr));
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w;
-      canvas.height = h;
-    }
-    const ctx = canvas.getContext("2d", { alpha: false });
-    return { ctx, w, h };
-  }
+  let playing = false;
 
   function pad(n) {
     return String(n).padStart(2, "0");
@@ -46,93 +41,117 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   }
 
-  function metric(value, unit) {
-    return `${value}<span class="unit">${unit}</span>`;
-  }
-
-  function renderTargets() {
-    const labels = { person: "人员", car: "车辆", bike: "非机动车" };
-    const frag = document.createDocumentFragment();
-    world.objects.forEach((obj) => {
-      const row = document.createElement("div");
-      row.className = "trow" + (obj.inZone ? " is-alarm" : "");
-      const id = document.createElement("span");
-      id.className = "tid";
-      id.textContent = "#" + pad(obj.id);
-      const name = document.createElement("span");
-      name.className = "name";
-      name.textContent = labels[obj.type];
-      if (obj.inZone) {
-        const tag = document.createElement("em");
-        tag.textContent = "禁区";
-        name.appendChild(tag);
-      }
-      const conf = document.createElement("span");
-      conf.className = "conf";
-      const vis = document.createElement("b");
-      vis.className = "c-vis";
-      vis.textContent = obj.visConf.toFixed(2);
-      const slash = document.createElement("i");
-      slash.textContent = "/";
-      const ir = document.createElement("b");
-      ir.className = "c-ir";
-      ir.textContent = obj.irConf.toFixed(2);
-      conf.append(vis, slash, ir);
-      const temp = document.createElement("span");
-      temp.className = "temp";
-      temp.textContent = obj.temp.toFixed(1) + "°C";
-      row.append(id, name, conf, temp);
-      frag.appendChild(row);
-    });
-    document.getElementById("target-list").replaceChildren(frag);
-  }
-
   function renderHud() {
-    const now = new Date();
-    const clock = formatClock(now);
-    const meta = CHANNELS[channel];
-    const m = world.metrics;
+    const split = channel === "both";
+    const meta = CHANNELS[split ? "vis" : channel];
+    const clock = formatClock(new Date());
     document.getElementById("clock").textContent = clock;
-    document.getElementById("osd-name").textContent = meta.name;
-    document.getElementById("osd-model").textContent = meta.model;
-    document.getElementById("osd-count").textContent = `目标 ${world.objects.length}`;
-    document.getElementById("osd-dual").textContent = `VIS ${m.visFps.toFixed(1)}  ·  IR ${m.irFps.toFixed(1)}`;
-    document.getElementById("burn").textContent = `${clock}    ${meta.burn}    周界监控`;
-    document.getElementById("vis-fps").textContent = m.visFps.toFixed(1) + " FPS";
-    document.getElementById("ir-fps").textContent = m.irFps.toFixed(1) + " FPS";
-    document.getElementById("m-npu").innerHTML = metric(m.npu.toFixed(0), "%");
-    document.getElementById("m-temp").innerHTML = metric(m.temp.toFixed(1), "°C");
-    document.getElementById("m-vfps").innerHTML = metric(m.visFps.toFixed(1), "FPS");
-    document.getElementById("m-ifps").innerHTML = metric(m.irFps.toFixed(1), "FPS");
-    document.getElementById("metric-foot").textContent = `内存 ${m.mem.toFixed(1)} / 8.0 GB  ·  推理延迟 ${m.latency.toFixed(0)} ms`;
-
-    const count = document.getElementById("target-count");
-    count.textContent = String(world.objects.length);
-    count.classList.toggle("hot", world.alarmActive);
-    alarm.classList.toggle("is-on", world.alarmActive);
-    alarmText.textContent = world.alarmBanner;
-    viewport.classList.toggle("alarm", world.alarmActive);
-
-    const foot = document.getElementById("foot-alarm");
-    foot.textContent = world.lastAlarm || "无活动告警";
-    const recent = world.lastAlarmAt && Date.now() - world.lastAlarmAt < 8000;
-    foot.classList.toggle("is-hot", world.alarmActive || recent);
-    renderTargets();
+    document.getElementById("osd-name").textContent = split ? "可见光 · 红外" : meta.name;
+    document.getElementById("osd-model").textContent = split ? "左右各占一半" : meta.model;
+    document.getElementById("burn").textContent = split
+      ? `${clock}    CAM-01 / CAM-02    周界监控`
+      : `${clock}    ${meta.burn}    周界监控`;
+    document.getElementById("osd-live").hidden = !playing;
+    document.querySelectorAll("img[data-role='main']").forEach((img) => {
+      img.classList.toggle("is-on", playing && (split || img.dataset.ch === channel));
+    });
   }
 
   function setChannel(next) {
-    if (!CHANNELS[next]) return;
+    if (next !== "both" && !CHANNELS[next]) return;
+    if (next === "both" && !ensurePlaying()) return;
     channel = next;
     viewport.dataset.ch = next;
-    document.title = `RK3588 算法智能监控 · ${next === "vis" ? "可见光" : "红外"}`;
+    const title = next === "both" ? "同时播放" : next === "vis" ? "可见光" : "红外";
+    document.title = `RK3588 算法智能监控 · ${title}`;
+    document.getElementById("btn-play").setAttribute("aria-selected", next === "both" ? "true" : "false");
     document.getElementById("btn-vis").setAttribute("aria-selected", next === "vis" ? "true" : "false");
     document.getElementById("btn-ir").setAttribute("aria-selected", next === "ir" ? "true" : "false");
     document.querySelectorAll(".preview").forEach((el) => {
-      const on = el.dataset.ch === next;
+      const on = next === "both" || el.dataset.ch === next;
       el.classList.toggle("active", on);
       el.setAttribute("aria-pressed", on ? "true" : "false");
     });
     renderHud();
+  }
+
+  function ensurePlaying() {
+    if (playing) return true;
+    if (location.protocol === "file:") {
+      document.getElementById("placeholder").textContent = "请先双击「启动.bat」，再用浏览器打开 http://127.0.0.1:8080";
+      return false;
+    }
+    const stamp = Date.now();
+    document.querySelectorAll("img.stream").forEach((img) => {
+      img.src = `/stream/${img.dataset.ch}?t=${stamp}`;
+    });
+    document.querySelectorAll("img[data-role='preview']").forEach((img) => img.classList.add("is-on"));
+    playing = true;
+    document.body.classList.add("is-playing");
+    const chip = document.getElementById("run-chip");
+    chip.textContent = "双路连接中";
+    chip.classList.add("ok");
+    return true;
+  }
+
+  function startBoth() {
+    setChannel("both");
+  }
+
+  function applyStatus(status) {
+    const names = ["vis", "ir"];
+    names.forEach((name) => {
+      const item = status[name] || { state: "idle", fps: 0, error: "" };
+      const text = STATE_TEXT[item.state] || item.state;
+      document.getElementById(`state-${name}`).textContent = text;
+      document.getElementById(name === "vis" ? "m-vis" : "m-ir").textContent = text;
+      document.getElementById(name === "vis" ? "vis-fps" : "ir-fps").textContent = item.fps ? `${item.fps.toFixed(1)} FPS` : "-- FPS";
+      document.getElementById(name === "vis" ? "m-vfps" : "m-ifps").innerHTML = item.fps
+        ? `${item.fps.toFixed(1)}<span class="unit">FPS</span>`
+        : "--";
+      const card = document.getElementById(`state-${name}`).closest(".source");
+      card.classList.toggle("is-playing", item.state === "playing");
+      card.classList.toggle("is-error", item.state === "error");
+    });
+    const failed = names.filter((name) => status[name] && status[name].state === "error");
+    alarm.classList.toggle("is-on", failed.length > 0);
+    alarmText.textContent = failed.map((name) => `${name === "vis" ? "可见光" : "红外"} ${status[name].error || "连接失败"}`).join(" · ");
+    const chip = document.getElementById("run-chip");
+    const foot = document.getElementById("foot-alarm");
+    if (!playing) {
+      chip.textContent = "未播放";
+      chip.classList.remove("ok");
+      foot.textContent = "等待播放";
+      return;
+    }
+    if (names.every((name) => status[name] && status[name].state === "playing")) {
+      chip.textContent = "双路播放";
+      chip.classList.add("ok");
+      foot.textContent = "可见光与红外同时播放";
+    } else if (failed.length) {
+      chip.textContent = "连接异常";
+      chip.classList.remove("ok");
+      foot.textContent = "视频流连接失败";
+    } else {
+      chip.textContent = "双路连接中";
+      chip.classList.add("ok");
+      foot.textContent = "正在连接两路视频";
+    }
+    document.getElementById("metric-foot").textContent = names
+      .map((name) => `${name === "vis" ? "可见光" : "红外"} ${STATE_TEXT[status[name].state] || "--"}`)
+      .join("  ·  ");
+  }
+
+  async function pollStatus() {
+    if (location.protocol === "file:") return;
+    try {
+      const response = await fetch("/api/status", { cache: "no-store" });
+      if (!response.ok) return;
+      applyStatus(await response.json());
+    } catch (error) {
+      if (!playing) return;
+      document.getElementById("metric-foot").textContent = "无法连接本地转发服务";
+    }
   }
 
   function toggleFull() {
@@ -140,24 +159,7 @@
     else viewport.requestFullscreen();
   }
 
-  function paint() {
-    const main = fit(mainCanvas);
-    const vis = fit(visCanvas);
-    const ir = fit(irCanvas);
-    if (main) Render.draw(main.ctx, main.w, main.h, channel, world);
-    if (vis) Render.draw(vis.ctx, vis.w, vis.h, "vis", world);
-    if (ir) Render.draw(ir.ctx, ir.w, ir.h, "ir", world);
-  }
-
-  function frame(now) {
-    if (!last) last = now;
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
-    Scene.update(world, dt);
-    paint();
-    requestAnimationFrame(frame);
-  }
-
+  btnPlay.addEventListener("click", startBoth);
   document.getElementById("btn-vis").addEventListener("click", () => setChannel("vis"));
   document.getElementById("btn-ir").addEventListener("click", () => setChannel("ir"));
   document.querySelectorAll(".preview").forEach((el) => {
@@ -176,9 +178,11 @@
     if (event.key === "1") setChannel("vis");
     else if (event.key === "2") setChannel("ir");
     else if (event.key === "f" || event.key === "F") toggleFull();
+    else if (event.key === "3" || (event.key === "Enter" && channel !== "both")) startBoth();
   });
 
   setChannel("vis");
-  setInterval(renderHud, 200);
-  requestAnimationFrame(frame);
+  setInterval(renderHud, 1000);
+  setInterval(pollStatus, 1000);
+  pollStatus();
 })();

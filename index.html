@@ -22,8 +22,7 @@
         </div>
       </div>
       <div class="top-status">
-        <span class="chip ok"><i></i>双路运行</span>
-        <span class="chip">演示模式</span>
+        <span class="chip" id="run-chip">未播放</span>
         <time id="clock">---- -- -- --:--:--</time>
       </div>
     </header>
@@ -31,25 +30,28 @@
     <main class="workspace">
       <section class="stage panel" aria-label="主画面">
         <div class="viewport" id="viewport" data-ch="vis">
-          <canvas id="main-canvas"></canvas>
+          <img class="stream" data-role="main" data-ch="vis" alt="可见光检测">
+          <img class="stream" data-role="main" data-ch="ir" alt="红外检测">
+          <span class="half-tag" data-half="vis">可见光检测</span>
+          <span class="half-tag" data-half="ir">红外检测</span>
+          <div class="placeholder" id="placeholder">点击「同时播放」，可见光和红外一起开始</div>
           <div class="osd-top">
             <div class="osd-group">
-              <span class="live"><i></i>LIVE</span>
+              <span class="live" id="osd-live" hidden><i></i>LIVE</span>
               <span id="osd-name">CAM-01 可见光</span>
-              <span id="osd-count">目标 0</span>
             </div>
             <div class="osd-group">
-              <span id="osd-model">yolov8s_vis_640.rknn</span>
-              <span id="osd-dual">VIS -- · IR --</span>
+              <span id="osd-model">rtsp://192.168.137.100:3500/video11-live/video11</span>
             </div>
           </div>
           <div class="alarm-banner" id="alarm" role="status">
-            <strong>禁区告警</strong>
+            <strong>连接失败</strong>
             <span id="alarm-text"></span>
           </div>
           <div class="burn" id="burn"></div>
           <div class="osd-bottom">
             <div class="switch" role="tablist" aria-label="主画面通道">
+              <button type="button" id="btn-play" role="tab" aria-selected="false">同时播放</button>
               <button type="button" id="btn-vis" role="tab" aria-selected="true">可见光检测</button>
               <button type="button" id="btn-ir" role="tab" aria-selected="false">红外检测</button>
             </div>
@@ -70,7 +72,7 @@
           <div class="previews">
             <button type="button" class="preview active" data-ch="vis" aria-pressed="true">
               <span class="media">
-                <canvas id="vis-canvas"></canvas>
+                <img class="stream" data-role="preview" data-ch="vis" alt="可见光检测">
                 <span class="media-hud">
                   <span class="hud-row">
                     <span class="live"><i></i>LIVE</span>
@@ -85,7 +87,7 @@
             </button>
             <button type="button" class="preview" data-ch="ir" aria-pressed="false">
               <span class="media">
-                <canvas id="ir-canvas"></canvas>
+                <img class="stream" data-role="preview" data-ch="ir" alt="红外检测">
                 <span class="media-hud">
                   <span class="hud-row">
                     <span class="live"><i></i>LIVE</span>
@@ -101,18 +103,21 @@
           </div>
         </section>
 
-        <section class="panel targets">
+        <section class="panel sources">
           <header class="card-h">
-            <h2>实时目标</h2>
-            <span class="count" id="target-count">0</span>
+            <h2>视频源</h2>
+            <span class="muted">RTSP</span>
           </header>
-          <div class="thead">
-            <span>编号</span>
-            <span>类别</span>
-            <span>可见 / 红外</span>
-            <span>温度</span>
+          <div class="source-list">
+            <div class="source">
+              <div class="source-top"><span>可见光检测</span><b id="state-vis">未播放</b></div>
+              <code>rtsp://192.168.137.100:3500/video11-live/video11</code>
+            </div>
+            <div class="source">
+              <div class="source-top"><span>红外检测</span><b id="state-ir">未播放</b></div>
+              <code>rtsp://192.168.137.100:3501/video0-live/video0</code>
+            </div>
           </div>
-          <div class="list" id="target-list"></div>
         </section>
 
         <section class="panel">
@@ -121,13 +126,13 @@
             <span class="muted">RK3588</span>
           </header>
           <div class="metrics">
-            <div class="metric">
-              <span>NPU 占用</span>
-              <strong id="m-npu">--</strong>
+            <div class="metric vis">
+              <span>可见光状态</span>
+              <strong id="m-vis">未播放</strong>
             </div>
-            <div class="metric">
-              <span>芯片温度</span>
-              <strong id="m-temp">--</strong>
+            <div class="metric ir">
+              <span>红外状态</span>
+              <strong id="m-ir">未播放</strong>
             </div>
             <div class="metric vis">
               <span>可见光帧率</span>
@@ -138,20 +143,18 @@
               <strong id="m-ifps">--</strong>
             </div>
           </div>
-          <p class="metric-foot" id="metric-foot">内存 -- · 延迟 --</p>
+          <p class="metric-foot" id="metric-foot">点击主画面「同时播放」后建立两路连接</p>
         </section>
       </aside>
     </main>
 
     <footer class="footer">
       <span>RK3588 · RKNN Runtime · 6 TOPS</span>
-      <span id="foot-models">yolov8s_vis_640.rknn / yolov8s_ir_640.rknn · 640×640</span>
-      <span id="foot-alarm">无活动告警</span>
+      <span id="foot-models">可见光 :3500/video11 · 红外 :3501/video0</span>
+      <span id="foot-alarm">等待播放</span>
     </footer>
   </div>
 
-  <script src="js/scene.js"></script>
-  <script src="js/render.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>
